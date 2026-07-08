@@ -70,7 +70,7 @@ export const Settings = mongoose.model('Settings', settingsSchema);
 const transactionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   appointment: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', index: true },
-  provider: { type: String, enum: ['razorpay', 'manual', 'free'], default: 'razorpay' },
+  provider: { type: String, enum: ['razorpay', 'manual', 'free','qr'], default: 'razorpay' },
   providerOrderId: String,
   providerPaymentId: String,
   intakeForm: String,

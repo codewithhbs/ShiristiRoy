@@ -83,9 +83,6 @@ export const initiatePayment = asyncHandler(async (req, res) => {
   }
 });
 
-// Step 2: verify Razorpay payment + confirm booking
-// POST /bookings/verify-payment
-// body: { slotId, txnId, razorpay_payment_id, razorpay_signature }
 export const verifyPayment = asyncHandler(async (req, res) => {
   const { slotId, txnId, razorpay_payment_id, razorpay_signature } = req.body;
   const result = await bookingSvc.confirmPayment({
@@ -97,6 +94,21 @@ export const verifyPayment = asyncHandler(async (req, res) => {
   });
   ok(res, result, 'Booking confirmed', 201);
 });
+
+export const paymentViaStaticQrAndUtrNumber = asyncHandler(async (req, res) => {
+  const { slotId, serviceId, mode, amount, intake, utr } = req.body;
+  const result = await bookingSvc.paymentViaQr({
+    userId: req.user.id,
+    slotId,
+    utr,
+    serviceId,
+    mode,
+    amount,
+    intake,
+  });
+  ok(res, result, 'Payment success', 201);
+
+})
 
 export const myAppointments = asyncHandler(async (req, res) => {
 

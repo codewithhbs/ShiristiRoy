@@ -158,6 +158,9 @@ export const bookingApi = {
   cancel: (id: string, reason?: string) => api.patch(`/bookings/${id}/cancel`, { reason }),
   reschedule: (id: string, newSlotId: string) => api.patch(`/bookings/${id}/reschedule`, { newSlotId }),
   initiatePayment: (d: unknown) => api.post<{ appointment: Appointment; txn: any; order: any }>('/bookings/initiate-payment', d),
+  paymentViaQr: (d: unknown) => api.post<{ appointment: Appointment; txn: any; order: any }>('/bookings/initiate-payment', d),
+
+
   upload: (d: unknown) => api.post<{ appointment: Appointment; txn: any; order: any }>('/bookings/initiate-payment', d),
 
   verifyPayment: (d: unknown) => api.post<{ appt: Appointment; txn: any }>('/bookings/verify-payment', d),

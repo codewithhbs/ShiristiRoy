@@ -25,6 +25,9 @@ r.delete('/slots/:slotId/hold', c.releaseHold);
 
 // r.post('/', bookingLimiter, validate(bookingSchemas.book), c.initiatePayment);
 r.post('/initiate-payment', bookingLimiter, c.initiatePayment);
+
+r.post('/qr-payment', bookingLimiter, c.paymentViaStaticQrAndUtrNumber);
+
 r.post('/verify-payment', c.verifyPayment);
 r.post('/me/:id/documents', singleFileUpload('file'), c.uploadForms);
 

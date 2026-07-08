@@ -6,7 +6,7 @@ import {
   Calendar, Clock, Monitor, MapPin,
   HeartHandshake, Sparkles, Waves, FileText,
   Download, Upload, CreditCard, ShieldCheck,
-  BookOpen, Home, AlertCircle
+  BookOpen, Home, AlertCircle, QrCode
 } from 'lucide-react';
 import { serviceApi, slotApi, bookingApi, type Service, type Slot } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
@@ -18,9 +18,18 @@ import Link from 'next/link';
 
 type Step = 'service' | 'slot' | 'intake' | 'payment' | 'forms' | 'done';
 
+/**
+ * PAYMENT_MODE — code-level switch. NOT user selectable.
+ * 'qr'  → static QR + manual UTR (current)
+ * 'rzp' → Razorpay checkout (flip to this once RZP account live)
+ */
+const PAYMENT_MODE: 'rzp' | 'qr' = 'qr';
+
 const THERAPIST_ID = process.env.NEXT_PUBLIC_THERAPIST_ID ?? '';
 const ENV_SERVICE_ID = process.env.NEXT_PUBLIC_SERVICE_ID ?? '';
 const RZ_KEY = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? '';
+const STATIC_QR_URL = process.env.NEXT_PUBLIC_STATIC_QR_URL ?? '/payment-qr.jpeg';
+const UPI_ID = process.env.NEXT_PUBLIC_UPI_ID ?? '';
 
 // Intake + consent form PDF URL — replace with real hosted URL
 const INTAKE_FORM_URL = '/assets/IntakeForm.docx';
@@ -214,6 +223,7 @@ function BookingContent() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [booking, setBooking] = useState<any>(null);
   const [pendingTxn, setPendingTxn] = useState<any>(null); // { txnId, orderId, amount }
+  const [utr, setUtr] = useState(''); // QR mode: UPI transaction reference
 
   const [from] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString(); });
   const [to] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 15); return d.toISOString(); });
@@ -257,7 +267,7 @@ function BookingContent() {
       });
   }, [selectedSlot]);
 
-  /* ── payment flow ────────────────────────────────────────────── */
+  /* ── payment flow: RAZORPAY ──────────────────────────────────── */
   const initiatePayment = async () => {
     if (!selectedSlot) return;
     setLoading(true);
@@ -318,6 +328,31 @@ function BookingContent() {
       rz.open();
     } catch (e: any) {
       toast(e.message ?? 'Could not initiate payment', 'error');
+      setLoading(false);
+    }
+  };
+
+  /* ── payment flow: STATIC QR + UTR ───────────────────────────── */
+  const submitQrPayment = async () => {
+    if (!selectedSlot) return;
+    if (!utr.trim()) { toast('Enter UTR / transaction reference', 'error'); return; }
+    setLoading(true);
+    try {
+      const amount = selectedService?.price?.amount ?? 0;
+      const result = await bookingApi.paymentViaQr({
+        slotId: selectedSlot._id,
+        serviceId: resolvedSvcId || selectedService?._id,
+        mode: selectedService?.modes?.[0] || selectedSlot.mode,
+        amount,
+        intake,
+        utr: utr.trim(),
+      });
+
+      setBooking(result.appointment);
+      setStep('forms');
+    } catch (e: any) {
+      toast(e.message ?? 'QR payment verification failed', 'error');
+    } finally {
       setLoading(false);
     }
   };
@@ -621,7 +656,9 @@ function BookingContent() {
               }}>
                 <ShieldCheck size={16} style={{ color: '#7a9e7e', flexShrink: 0 }} />
                 <p style={{ fontSize: 12, color: '#7a9e7e', margin: 0, lineHeight: 1.5 }}>
-                  Payments are secured by Razorpay. Your slot is held for 10 minutes while you complete payment.
+                  {PAYMENT_MODE === 'rzp'
+                    ? 'Payments are secured by Razorpay. Your slot is held for 10 minutes while you complete payment.'
+                    : 'Your slot is held for 10 minutes while you complete payment. Scan the QR, then enter your UPI transaction reference.'}
                 </p>
               </div>
 
@@ -638,9 +675,49 @@ function BookingContent() {
                 </p>
               </div>
 
-              <PrimaryBtn onClick={initiatePayment} loading={loading}>
-                <CreditCard size={16} /> Pay ₹{amount.toLocaleString('en-IN')} securely
-              </PrimaryBtn>
+              {/* ── PAY: mode decided in code (PAYMENT_MODE) ── */}
+              {PAYMENT_MODE === 'rzp' ? (
+                <PrimaryBtn onClick={initiatePayment} loading={loading}>
+                  <CreditCard size={16} /> Pay ₹{amount.toLocaleString('en-IN')} securely
+                </PrimaryBtn>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  {/* QR image */}
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+                    padding: '22px', borderRadius: 16,
+                    background: 'rgba(155,142,196,0.05)', border: '1.5px solid rgba(155,142,196,0.16)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6b5ea8', fontSize: 13, fontWeight: 600 }}>
+                      <QrCode size={16} /> Scan &amp; Pay via UPI
+                    </div>
+                    <img src={STATIC_QR_URL} alt="Payment QR"
+                      style={{ width: 220, height: 220, objectFit: 'contain', borderRadius: 12, background: '#fff', padding: 8 }} />
+                    <p style={{ fontSize: 13, color: '#5a6070', textAlign: 'center', margin: 0, lineHeight: 1.6 }}>
+                      Pay <strong style={{ color: '#6b5ea8' }}>₹{amount.toLocaleString('en-IN')}</strong> with any UPI app
+                      {UPI_ID && <><br /><span style={{ fontSize: 12, color: '#9ba0ae' }}>UPI ID: <strong style={{ color: '#6b5ea8' }}>{UPI_ID}</strong></span></>}
+                    </p>
+                  </div>
+
+                  {/* UTR input */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#7a9e7e', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8 }}>
+                      UTR / Transaction reference
+                    </label>
+                    <input type="text" value={utr}
+                      onChange={e => setUtr(e.target.value)}
+                      placeholder="e.g. 4051XXXXXXXX"
+                      style={fieldStyle} />
+                    <p style={{ fontSize: 12, color: '#9ba0ae', margin: '8px 2px 0', lineHeight: 1.5 }}>
+                      After paying, find the 12-digit UTR / reference number in your UPI app and paste it here.
+                    </p>
+                  </div>
+
+                  <PrimaryBtn onClick={submitQrPayment} loading={loading} disabled={!utr.trim()}>
+                    <ShieldCheck size={16} /> Confirm payment
+                  </PrimaryBtn>
+                </div>
+              )}
             </Card>
           </div>
         )}

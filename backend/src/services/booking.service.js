@@ -194,6 +194,67 @@ export async function initiatePayment({ userId, slotId, serviceId, mode, amount,
   return { appointment: appt, txn, order: rzOrder };
 }
 
+export async function paymentViaQr({ userId, slotId, serviceId, mode, amount, intake = {}, utr }) {
+  // fetch slot for startAt/endAt/therapist
+  const slot = await Slot.findById(slotId).lean();
+  if (!slot) throw new ApiError(404, 'Slot not found');
+
+  // idempotent: reuse existing pending appointment for same (user, slot)
+  const stub = await Appointment.findOneAndUpdate(
+    { slot: slotId },
+    {
+      $setOnInsert: {
+        bookingCode: `SR-${code()}`,
+        user: userId,
+        therapist: slot.therapist,
+        service: serviceId,
+        slot: slotId,
+        startAt: slot.startAt,
+        endAt: slot.endAt,
+        mode: mode || slot.mode,
+        status: APPOINTMENT_STATUS.PENDING,
+        intake,
+      },
+    },
+    { upsert: true, new: true },
+  );
+
+  const paid = Boolean(utr);
+
+  // persist transaction
+  const txn = await Transaction.create({
+    user: userId,
+    appointment: stub._id,
+    provider: 'qr',
+    providerOrderId: utr || null,
+    providerPaymentId: utr || null,
+    amount,
+    currency: 'INR',
+    status: paid ? 'paid' : 'failed',
+    meta: { utr: utr || null },
+  });
+
+  // link txn to appointment stub
+  stub.payment = txn._id;
+  await stub.save();
+
+  // no UTR → failed: release hold, notify, bail
+  if (!paid) {
+    await releaseHold({ slotId, userId }).catch(() => { });
+    const u = await User.findById(userId).catch(() => null);
+    if (u?.email) {
+      await sendEmail({ to: u.email, ...templates.bookingFailed({ reason: 'QR payment not received (no UTR)' }) }).catch(() => { });
+    }
+    if (process.env.ADMIN_EMAIL) {
+      await sendEmail({ to: process.env.ADMIN_EMAIL, ...templates.adminPaymentFailed({ userEmail: u?.email || userId, reason: 'QR payment not received (no UTR)' }) }).catch(() => { });
+    }
+    return { appt: null, txn };
+  }
+
+  // paid → confirm booking atomically (flips slot BOOKED + appt CONFIRMED)
+  const appt = await _confirmBooking({ userId, slotId, txnId: txn._id });
+  return { appt, txn };
+}
 /**
  * Step 2 — Verify Razorpay signature, capture payment, confirm booking.
  * Idempotent on (user, slot).
